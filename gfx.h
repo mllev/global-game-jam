@@ -107,6 +107,8 @@ struct _gfx {
 
   int attr_type;
 
+  int enabled;
+
   gfxrgb solid_color;
 
   struct {
@@ -119,9 +121,6 @@ struct _gfx {
   int num_lights;
 
   gfxuint clear_color;
-
-  gfxrgb fog_color;
-  int fog_enabled;
 
   int vertex_count;
   int index_count;
@@ -171,6 +170,10 @@ enum {
   GFX_POINT_LIGHT
 };
 
+enum {
+  GFX_LIGHTS = 1
+};
+
 int gfx_init(void);
 unsigned int gfx_memory_requirements(void);
 
@@ -187,8 +190,8 @@ void gfx_bind_texture(int);
 void gfx_draw_arrays(int, int);
 void gfx_draw_text_8x8(char[][8], const char *, int, int, int);
 void gfx_draw_line(float, float, float, float, gfxuint);
-void gfx_enable_fog(int);
-void gfx_fog_color(float, float, float);
+void gfx_enable(int);
+void gfx_disable(int);
 void gfx_draw_mode(int);
 void gfx_matrix_mode(int);
 void gfx_rotate(float, float, float, float);
@@ -402,6 +405,16 @@ gfxbyte gfx_add_to_palette (float r, float g, float b, float a)
   }
 }
 
+void gfx_enable (int feature)
+{
+  GFX.enabled |= feature;
+}
+
+void gfx_disable (int feature)
+{
+  GFX.enabled &= ~feature;
+}
+
 void gfx_upload_texture (unsigned char *image, int width, int height, int channels, int *id)
 {
   gfxbyte *ptr = image;
@@ -525,19 +538,16 @@ int gfx_init ()
   GFX.colors = NULL;
   GFX.texture = NULL;
 
+  GFX.enabled = 0;
+
   GFX.attr_type = GFX_ATTR_RGB;
 
   GFX.solid_color.r = 1.0;
   GFX.solid_color.g = 1.0;
   GFX.solid_color.b = 1.0;
 
-  GFX.fog_color.r = 1.0;
-  GFX.fog_color.g = 1.0;
-  GFX.fog_color.b = 1.0;
-
   GFX.clear_color = 0;
   GFX.num_lights = 0;
-  GFX.fog_enabled = 0;
   GFX.num_palette_colors = 0;
 
   GFX.draw_mode = GFX_FLAT_FILL_MODE;
@@ -566,18 +576,6 @@ void gfx_clear ()
 unsigned int gfx_memory_requirements ()
 {
   return (gfxuint)sizeof(struct _gfx);
-}
-
-void gfx_enable_fog (int enable)
-{
-  GFX.fog_enabled = enable;
-}
-
-void gfx_fog_color (float r, float g, float b)
-{
-  GFX.fog_color.r = r;
-  GFX.fog_color.g = g;
-  GFX.fog_color.b = b;
 }
 
 void gfx_matrix_mode (int m)
@@ -1057,19 +1055,30 @@ void gfx_draw_triangle (int index)
     u3 = GFX.vertex_pipe[i3].uv.u * w3;
     v3 = GFX.vertex_pipe[i3].uv.v * w3;
 
-    for (i = 0, j = 0; i < max; i++) {
-      gfxrgb c = gfx_light_color(GFX.palette[i], tri->normal, tri->center);
-
-      GFX.palette_argb32[j++] = gfx_gfxrgb_to_argb32(c);
+    if (GFX.enabled & GFX_LIGHTS) {
+      for (i = 0, j = 0; i < max; i++) {
+        gfxrgb c = gfx_light_color(GFX.palette[i], tri->normal, tri->center);
+        GFX.palette_argb32[j++] = gfx_gfxrgb_to_argb32(c);
+      }
+    } else {
+      for (i = 0, j = 0; i < max; i++) {
+        GFX.palette_argb32[j++] = gfx_gfxrgb_to_argb32(GFX.palette[i]);
+      }
     }
   } else if (GFX.attr_type == GFX_ATTR_COLORS) {
-    gfxrgb c = gfx_light_color(tri->color, tri->normal, tri->center);
-    color = gfx_gfxrgb_to_argb32(c);
-    u1 = v1 = u2 = v2 = u3 = v3 = 0;
+    if (GFX.enabled & GFX_LIGHTS) {
+      gfxrgb c = gfx_light_color(tri->color, tri->normal, tri->center);
+      color = gfx_gfxrgb_to_argb32(c);
+    } else {
+      color = gfx_gfxrgb_to_argb32(tri->color);
+    }
   } else {
-    gfxrgb c = gfx_light_color(GFX.solid_color, tri->normal, tri->center);
-    color = gfx_gfxrgb_to_argb32(c);
-    u1 = v1 = u2 = v2 = u3 = v3 = 0;
+    if (GFX.enabled & GFX_LIGHTS) {
+      gfxrgb c = gfx_light_color(GFX.solid_color, tri->normal, tri->center);
+      color = gfx_gfxrgb_to_argb32(c);
+    } else {
+      color = gfx_gfxrgb_to_argb32(GFX.solid_color);
+    }
   }
 
   if (vert2->y < vert1->y) {

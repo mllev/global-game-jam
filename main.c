@@ -13,48 +13,106 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+typedef struct vec2 Vec2;
+typedef struct player Player;
+
+struct vec2 { float x, y; };
+
+struct player {
+  float x, y;
+  Vec2 forward;
+  float speed;
+  int texture_id;
+  float angle;
+};
+
+void init_player (Player *p)
+{
+  p->x = 0;
+  p->y = 0;
+  p->forward.x = 0;
+  p->forward.y = -1;
+  p->speed = 0.15;
+  p->angle = 0.0;
+}
+
+void rotate_player (Player *p, float a)
+{
+  float c = cosf(a);
+  float s = sinf(a);
+
+  float x = c * p->forward.x - s * p->forward.y;
+  float y = c * p->forward.y + s * p->forward.x;
+
+  p->forward.x = x;
+  p->forward.y = y;
+  p->angle += a;
+
+  if (p->angle > (GFX_PI * 2)) {
+    p->angle -= (GFX_PI * 2);
+  } else if (p->angle < -(GFX_PI * 2)) {
+    p->angle += (GFX_PI * 2);
+  }
+}
+
+void draw_player (Player* p)
+{
+  float max = GFX_PI * 2.0;
+  float tex_frac = 1.0 / 22.0;
+  float frac = floor((max - p->angle) / max * 22.0) * tex_frac;
+
+  float vertices[] = {
+    0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0,
+    1.0, 1.0, 0.0,
+    1.0, 0.0, 0.0
+  };
+
+  int indices[] = {
+    0, 1, 2,
+    0, 2, 3
+  };
+
+  float uvs[] = {
+    1.0, 1.0,
+    1.0, 0.0,
+    0.0, 0.0,
+    0.0, 1.0,
+  };
+
+  uvs[0] = frac + tex_frac;
+  uvs[2] = frac + tex_frac;
+  uvs[4] = frac;
+  uvs[6] = frac;
+
+  gfx_matrix_mode(GFX_MODEL_MATRIX);
+  gfx_identity();
+  gfx_translate(p->x, p->y, 10);
+  gfx_scale(3, 3, 0);
+  gfx_translate(-0.5, -0.5, 0);
+  gfx_bind_arrays(vertices, 4, indices, 2);
+  gfx_bind_attr(GFX_ATTR_UVS, uvs);
+  gfx_bind_texture(p->texture_id);
+  gfx_draw_arrays(0, -1);
+}
+
 void run (window_t *window, gfxuint *framebuffer, int width, int height)
 {
   float *depthbuffer = malloc(width * height * sizeof(float));
-  float white[] = { 1.0, 1.0, 1.0 };
-  float rotate = 0.0;
   gfx_context *ctx = malloc(sizeof(gfx_context));
   int tw, th, channels;
   unsigned char *bmp;
   int texture_id;
+  Player robo;
 
-  float cube_vertices[] = {
-    0.0, 0.0, 0.0,
-    0.0, 0.0, 1.0,
-    0.0, 1.0, 0.0,
-    0.0, 1.0, 1.0,
-    1.0, 0.0, 0.0,
-    1.0, 0.0, 1.0,
-    1.0, 1.0, 0.0,
-    1.0, 1.0, 1.0
-  };
-
-  int cube_indices[] = {
-    0, 6, 4,
-    0, 2, 6,
-    0, 3, 2,
-    0, 1, 3,
-    2, 7, 6,
-    2, 3, 7,
-    4, 7, 5,
-    4, 6, 7,
-    0, 5, 1,
-    0, 4, 5,
-    1, 7, 3,
-    1, 5, 7
-  };
-
-  bmp = stbi_load("images.png", &tw, &th, &channels, 0);
+  bmp = stbi_load("robovac-sheet.png", &tw, &th, &channels, 0);
 
   if (!depthbuffer) {
     free(framebuffer);
     return;
   }
+
+  init_player(&robo);
 
   gfx_use_context(ctx);
   gfx_init();
@@ -65,33 +123,25 @@ void run (window_t *window, gfxuint *framebuffer, int width, int height)
   gfx_perspective(70, (float)width / (float)height, 0.1, 100);
   gfx_upload_texture(bmp, tw, th, channels, &texture_id);
 
+  robo.texture_id = texture_id;
+
   while (!window->quit) {
     gfx_matrix_mode(GFX_VIEW_MATRIX);
     gfx_identity();
 
-    gfx_point_light(-3, 2, 0, 1, 0, 0, 1);
-    gfx_point_light(0, 0, 0, 0, 0, 1, 1);
+    if (window->keys.w) {
+      robo.x += (robo.forward.x * robo.speed);
+      robo.y += (robo.forward.y * robo.speed);
+    } else if (window->keys.a) {
+      rotate_player(&robo, 0.1);
+    } else if (window->keys.d) {
+      rotate_player(&robo, -0.1);
+    }
 
-    gfx_matrix_mode(GFX_MODEL_MATRIX);
-
-    gfx_identity();
-    gfx_translate(0, 0, 3);
-    gfx_rotate(0, 1, 0, rotate);
-    gfx_rotate(1, 0, 0, rotate);
-    gfx_translate(-0.5, -0.5, -0.5);
-    gfx_bind_arrays(cube_vertices, 8, cube_indices, 12);
-    gfx_bind_attr(GFX_ATTR_RGB, white);
-    gfx_draw_arrays(0, -1);
-
-    gfx_identity();
-    gfx_translate(-3, 0, 3);
-    gfx_rotate(0, 0, 1, rotate);
-    gfx_draw_textured_quad(texture_id);
+    draw_player(&robo);
 
     window_update(window, framebuffer);
     gfx_clear();
-    gfx_reset_lights();
-    rotate += 0.01;
   }
 
   window_close(window);
