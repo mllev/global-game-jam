@@ -26,6 +26,7 @@ typedef struct room Room;
 typedef struct game Game;
 typedef struct tile Tile;
 typedef struct dirt Dirt;
+typedef struct cat Cat;
 
 struct vec2 { float x, y; };
 struct vec2i { int x, y; };
@@ -39,6 +40,13 @@ struct dirt {
 struct tile {
   int x, y;
   unsigned int flags;
+};
+
+struct cat {
+  float x, y;
+  int texture_index;
+  int tile_size;
+  int angle_index;
 };
 
 struct player {
@@ -73,6 +81,8 @@ struct game {
   int tile_count;
   int dust_texture_index;
   int floor_texture_index;
+  int cat_walk_start_index;
+  int cat_walk_end_index;
   int wall_texture_index;
   int screen_height;
   int screen_width;
@@ -82,6 +92,115 @@ struct game {
 };
 
 Game GAME;
+
+Vec2 angles[] = {
+  { 0.0,  -1.0 },
+  { 1.0,  -1.0 },
+  { 1.0,   0.0 },
+  { 1.0,   1.0 },
+  { 0.0,   1.0 },
+  { -1.0,  1.0 },
+  { -1.0,  0.0 },
+  { -1.0, -1.0 }
+};
+
+Vec2 project_to_screen (float x, float y)
+{
+  Vec2 v;
+  v.x = (x - GAME.camera.x) + ((float)GAME.screen_width / 2.0);
+  v.y = (y - GAME.camera.y) + ((float)GAME.screen_height / 2.0);
+  return v;
+}
+
+unsigned int rand_between(unsigned int min, unsigned int max)
+{
+  return (rand() % (max + 1 - min)) + min;
+}
+
+void init_cat (Cat *c)
+{
+  c->x = 10.0;
+  c->y = 10.0;
+  c->angle_index = 0;
+  c->texture_index = 0;
+  c->tile_size = 64;
+}
+
+void draw_cat (Cat *c)
+{
+  Vec2 v = project_to_screen(c->x, c->y);
+  m8_draw_tile_scaled(v.x, v.y, c->tile_size, c->tile_size, 32, GAME.cat_walk_start_index + c->texture_index);
+}
+
+int cat_has_collided (Cat *p)
+{
+  float player_width = (float)p->tile_size;
+  float pad = player_width / 4.0;
+  float tile_width = (float)GAME.tile_size;
+  Vec2i tiles[9];
+  int tidx = 0;
+  int min_y, max_y, min_x, max_x;
+  int x, y, i, j;
+  unsigned int flags = 0;
+
+  min_x = (int)floor((p->x + pad) / tile_width);
+  min_y = (int)floor((p->y + pad) / tile_width);
+  max_x = (int)ceil(((p->x + player_width - pad)) / tile_width);
+  max_y = (int)ceil(((p->y + player_width - pad)) / tile_width);
+
+  for (y = min_y; y < max_y; y++) {
+    for (x = min_x; x < max_x; x++) {
+      flags |= (1 << tidx);
+      tiles[tidx].x = x;
+      tiles[tidx++].y = y;
+    }
+  }
+
+  for (i = 0; i < GAME.tile_count; i++) {
+    for (j = 0; j < tidx; j++) {
+      if (GAME.tiles[i].x == tiles[j].x && GAME.tiles[i].y == tiles[j].y) {
+        flags &= ~(1 << j);
+      }
+    }
+  }
+
+  return flags > 0;
+}
+
+void animate_cat (Cat *c, int min, int max)
+{
+  static float tick = 1.0;
+  if (c->texture_index < min || c->texture_index > max) {
+    c->texture_index = min;
+  }
+  if (tick <= 0) {
+    c->texture_index = c->texture_index + 1;
+    if (c->texture_index > max) {
+      c->texture_index = min;
+    }
+    tick = 1.0;
+  } else {
+    tick -= 0.15;
+  }
+}
+
+void update_cat (Cat *c)
+{
+  float xspeed = angles[c->angle_index].x * 0.5;
+  float yspeed = angles[c->angle_index].y * 0.5;
+
+  c->x += xspeed;
+  c->y += yspeed;
+
+  if (cat_has_collided(c)) {
+    c->x -= xspeed;
+    c->y -= yspeed;
+
+    c->angle_index = rand_between(0, 7);
+  }
+
+  animate_cat(c, 0, 3);
+}
 
 void init_player (Player *p)
 {
@@ -207,17 +326,6 @@ void clean_dirt (Player *p)
   }
 }
 
-Vec2 angles[] = {
-  { 0.0,  -1.0 },
-  { 1.0,  -1.0 },
-  { 1.0,   0.0 },
-  { 1.0,   1.0 },
-  { 0.0,   1.0 },
-  { -1.0,  1.0 },
-  { -1.0,  0.0 },
-  { -1.0, -1.0 }
-};
-
 void rotate_player (Player *p, float a)
 {
   p->angle += a;
@@ -237,14 +345,6 @@ void rotate_player (Player *p, float a)
   }
 }
 
-Vec2 project_to_screen (float x, float y)
-{
-  Vec2 v;
-  v.x = (x - GAME.camera.x) + ((float)GAME.screen_width / 2.0);
-  v.y = (y - GAME.camera.y) + ((float)GAME.screen_height / 2.0);
-  return v;
-}
-
 void draw_player (Player* p)
 {
   Vec2 v = project_to_screen(p->x, p->y);
@@ -256,7 +356,6 @@ void draw_world ()
 {
   int i;
   int tile_size = GAME.tile_size;
-  float wall_size = (float)GAME.tile_size / 2.0;
 
   for (i = 0; i < GAME.tile_count; i++) {
     int tx = GAME.tiles[i].x * tile_size;
@@ -269,11 +368,6 @@ void draw_world ()
       m8_draw_tile_scaled(v.x, v.y + (float)tile_size, tile_size, tile_size, 32, GAME.wall_texture_index);
     }
   }
-}
-
-unsigned int rand_between(unsigned int min, unsigned int max)
-{
-  return (rand() % (max + 1 - min)) + min;
 }
 
 int room_intersects_rooms (Room *r1)
@@ -509,10 +603,16 @@ void init_game (int width, int height)
   generate_world();
 }
 
-void run (window_t *window, m8u32 *framebuffer, int width, int height)
+void load_texture (const char *file, int *start, int *end)
 {
   int tw, th, channels;
-  unsigned char *bmp;
+  unsigned char *bmp = stbi_load(file, &tw, &th, &channels, 0);
+  m8_import_tiles_from_image(bmp, tw, th, channels, 32, start, end);
+  free(bmp);
+}
+
+void run (window_t *window, m8u32 *framebuffer, int width, int height)
+{
   Mode8 *ctx;
   int start_index, end_index;
   Player robo;
@@ -525,30 +625,18 @@ void run (window_t *window, m8u32 *framebuffer, int width, int height)
 
   init_player(&robo);
 
-  bmp = stbi_load("robovac-sheet.png", &tw, &th, &channels, 0);
-  m8_import_tiles_from_image(bmp, tw, th, channels, 32, &start_index, &end_index);
+  load_texture("images/robovac-sheet.png", &start_index, &end_index);
   robo.texture_start_index = start_index;
   robo.texture_end_index = end_index;
 
-  free(bmp);
-
-  bmp = stbi_load("floortile.png", &tw, &th, &channels, 0);
-  m8_import_tiles_from_image(bmp, tw, th, channels, 32, &start_index, &end_index);
+  load_texture("images/floortile.png", &start_index, &end_index);
   GAME.floor_texture_index = start_index;
 
-  free(bmp);
-
-  bmp = stbi_load("walltile.png", &tw, &th, &channels, 0);
-  m8_import_tiles_from_image(bmp, tw, th, channels, 32, &start_index, &end_index);
+  load_texture("images/walltile.png", &start_index, &end_index);
   GAME.wall_texture_index = start_index;
 
-  free(bmp);
-
-  bmp = stbi_load("dust.png", &tw, &th, &channels, 0);
-  m8_import_tiles_from_image(bmp, tw, th, channels, 32, &start_index, &end_index);
+  load_texture("images/dust.png", &start_index, &end_index);
   GAME.dust_texture_index = start_index;
-
-  free(bmp);
 
   init_game(width, height);
 
@@ -577,8 +665,11 @@ void run (window_t *window, m8u32 *framebuffer, int width, int height)
       if (robo.charge <= 0) {
         const char* message = "Your battery has died";
         const char* begin = "press ENTER to continue";
+        char score[20];
+        sprintf(score, "SCORE: %d", robo.score);
         m8_draw_text_8x8(ascii, message, strlen(message), 235, 150);
-        m8_draw_text_8x8(ascii, begin, strlen(begin), 230, 170);
+        m8_draw_text_8x8(ascii, score, strlen(score), 280, 167);
+        m8_draw_text_8x8(ascii, begin, strlen(begin), 230, 190);
 
         if (window->keys.enter) {
           init_player(&robo);

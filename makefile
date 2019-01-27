@@ -1,7 +1,7 @@
 WARNS=-Wall -ansi -pedantic -std=c89
 LEVEL=-O0
 FRAMEWORK=-F/Library/Frameworks -framework
-ENTRY=main.c
+ENTRY=src/main.c
 
 all:
 	gcc $(ENTRY) $(LEVEL) $(WARNS) $(FRAMEWORK) SDL2 -o prog
