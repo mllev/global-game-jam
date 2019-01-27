@@ -15,15 +15,31 @@
 
 #define MAX_ROOMS 100
 #define MAX_TILES 1000
+#define MAX_DIRT 4000
+
+#define CLAMP(x,a,b) ((x)>(a)?((x)<(b)?(x):(b)):(a))
 
 typedef struct vec2 Vec2;
 typedef struct vec2i Vec2i;
 typedef struct player Player;
 typedef struct room Room;
 typedef struct game Game;
+typedef struct tile Tile;
+typedef struct dirt Dirt;
 
 struct vec2 { float x, y; };
 struct vec2i { int x, y; };
+
+struct dirt {
+  int x, y;
+  int texture_index;
+  int collected;
+};
+
+struct tile {
+  int x, y;
+  unsigned int flags;
+};
 
 struct player {
   float x, y;
@@ -33,6 +49,12 @@ struct player {
   int texture_end_index;
   float angle;
   int is_accelerating;
+  int is_reversing;
+  int can_accelerate;
+  int tile_size;
+  int angle_index;
+  int score;
+  float charge;
 };
 
 struct room {
@@ -43,10 +65,15 @@ struct room {
 
 struct game {
   Room rooms[MAX_ROOMS];
-  Vec2i tiles[MAX_TILES];
+  Tile tiles[MAX_TILES];
+  Dirt dirt[MAX_DIRT];
+  int tile_size;
+  int dirt_count;
   int room_count;
   int tile_count;
+  int dust_texture_index;
   int floor_texture_index;
+  int wall_texture_index;
   int screen_height;
   int screen_width;
   struct {
@@ -58,55 +85,155 @@ Game GAME;
 
 void init_player (Player *p)
 {
-  p->x = 0;
-  p->y = 0;
-  p->forward.x = 0;
-  p->forward.y = -1;
+  p->x = 5.0;
+  p->y = 5.0;
+  p->forward.x = 0.0;
+  p->forward.y = -1.0;
   p->speed = 0.0;
   p->angle = 0.0;
+  p->score = 0;
+  p->charge = 5.0;
+
+  p->tile_size = 32;
+
+  p->angle_index = 0;
+  p->can_accelerate = 1;
+  p->is_reversing = 0;
   p->is_accelerating = 0;
-  p->texture_start_index = 0;
-  p->texture_end_index = 0;
+}
+
+int has_collided (Player *p)
+{
+  float player_width = (float)p->tile_size;
+  float pad = player_width / 4.0;
+  float tile_width = (float)GAME.tile_size;
+  Vec2i tiles[9];
+  int tidx = 0;
+  int min_y, max_y, min_x, max_x;
+  int x, y, i, j;
+  unsigned int flags = 0;
+
+  min_x = (int)floor((p->x + pad) / tile_width);
+  min_y = (int)floor((p->y + pad) / tile_width);
+  max_x = (int)ceil(((p->x + player_width - pad)) / tile_width);
+  max_y = (int)ceil(((p->y + player_width - pad)) / tile_width);
+
+  for (y = min_y; y < max_y; y++) {
+    for (x = min_x; x < max_x; x++) {
+      flags |= (1 << tidx);
+      tiles[tidx].x = x;
+      tiles[tidx++].y = y;
+    }
+  }
+
+  for (i = 0; i < GAME.tile_count; i++) {
+    for (j = 0; j < tidx; j++) {
+      if (GAME.tiles[i].x == tiles[j].x && GAME.tiles[i].y == tiles[j].y) {
+        flags &= ~(1 << j);
+      }
+    }
+  }
+
+  return flags > 0;
 }
 
 void update_player (Player* p)
 {
-  if (p->is_accelerating) {
-    p->speed += 0.1;
-  } else {
-    p->speed -= 0.1;
+  if (p->is_reversing) {
+    if (p->speed < 0) {
+      p->x += (p->forward.x * p->speed);
+      p->y += (p->forward.y * p->speed);
+
+      if (!has_collided(p)) {
+        p->speed += 0.2;
+      }
+    } else {
+      p->speed = 0;
+      p->is_reversing = 0;
+    }
+
+    return;
   }
 
-  if (p->speed > 4.0) {
-    p->speed = 4.0;
+  if (p->is_accelerating) {
+    if (p->can_accelerate) {
+      p->speed += 0.2;
+    }
+  } else {
+    p->can_accelerate = 1;
+    p->speed -= 0.2;
+  }
+
+  if (p->speed > 7.0) {
+    p->speed = 7.0;
   }
 
   if (p->speed < 0.0) {
     p->speed = 0.0;
+    p->is_reversing = 0;
   }
 
   if (p->speed > 0) {
     p->x += (p->forward.x * p->speed);
     p->y += (p->forward.y * p->speed);
   }
+
+  if (has_collided(p)) {
+    p->speed = 0;
+    p->is_reversing = 1;
+    p->can_accelerate = 0;
+    p->speed = -2.0;
+  }
+
+  p->charge -= 0.001;
 }
+
+void clean_dirt (Player *p)
+{
+  float half = p->tile_size / 2.0;
+  float cx = p->x + half;
+  float cy = p->y + half;
+
+  int i, max = GAME.dirt_count;
+  for (i = 0; i < max; i++) {
+    if (!GAME.dirt[i].collected) {
+      float dx = (float)GAME.dirt[i].x + 16.0;
+      float dy = (float)GAME.dirt[i].y + 16.0;
+      if (fabs(dx - cx) < 10 && fabs(dy - cy) < 10) {
+        GAME.dirt[i].collected = 1;
+        p->score++;
+      }
+    }
+  }
+}
+
+Vec2 angles[] = {
+  { 0.0,  -1.0 },
+  { 1.0,  -1.0 },
+  { 1.0,   0.0 },
+  { 1.0,   1.0 },
+  { 0.0,   1.0 },
+  { -1.0,  1.0 },
+  { -1.0,  0.0 },
+  { -1.0, -1.0 }
+};
 
 void rotate_player (Player *p, float a)
 {
-  float c = cosf(a);
-  float s = sinf(a);
-
-  float x = c * p->forward.x - s * p->forward.y;
-  float y = c * p->forward.y + s * p->forward.x;
-
-  p->forward.x = x;
-  p->forward.y = y;
   p->angle += a;
 
-  if (p->angle > (M8_PI * 2)) {
+  if (p->angle < -1) {
     p->angle = 0;
-  } else if (p->angle < 0) {
-    p->angle += (M8_PI * 2);
+    if (p->angle_index == 0) p->angle_index = 7;
+    else p->angle_index--;
+    p->forward.x = angles[p->angle_index].x;
+    p->forward.y = angles[p->angle_index].y;
+  } else if (p->angle > 1) {
+    p->angle = 0;
+    if (p->angle_index == 7) p->angle_index = 0;
+    else p->angle_index++;
+    p->forward.x = angles[p->angle_index].x;
+    p->forward.y = angles[p->angle_index].y;
   }
 }
 
@@ -120,24 +247,27 @@ Vec2 project_to_screen (float x, float y)
 
 void draw_player (Player* p)
 {
-  int max = (p->texture_end_index - p->texture_start_index) + 1;
-  int index = (int)floor((p->angle / (M8_PI * 2)) * (float)max);
   Vec2 v = project_to_screen(p->x, p->y);
 
-  m8_draw_tile_scaled(v.x, v.y, 64, 64, 32, index + p->texture_start_index);
+  m8_draw_tile_scaled(v.x, v.y, p->tile_size, p->tile_size, 32, p->texture_start_index + p->angle_index);
 }
 
 void draw_world ()
 {
   int i;
-  int tilesize = 64;
+  int tile_size = GAME.tile_size;
+  float wall_size = (float)GAME.tile_size / 2.0;
 
   for (i = 0; i < GAME.tile_count; i++) {
-    int tx = GAME.tiles[i].x * tilesize;
-    int ty = GAME.tiles[i].y * tilesize;
+    int tx = GAME.tiles[i].x * tile_size;
+    int ty = GAME.tiles[i].y * tile_size;
 
     Vec2 v = project_to_screen((float)tx, (float)ty);
-    m8_draw_tile_scaled(v.x, v.y, tilesize, tilesize, 32, GAME.floor_texture_index);
+    m8_draw_tile_scaled(v.x, v.y, tile_size, tile_size, 32, GAME.floor_texture_index);
+
+    if (GAME.tiles[i].flags & (1 << 1)) {
+      m8_draw_tile_scaled(v.x, v.y + (float)tile_size, tile_size, tile_size, 32, GAME.wall_texture_index);
+    }
   }
 }
 
@@ -198,18 +328,86 @@ Room generate_room ()
   return r;
 }
 
+void draw_dirt ()
+{
+  int i, max = GAME.dirt_count;
+  for (i = 0; i < max; i++) {
+    if (GAME.dirt[i].collected) continue;
+    Vec2 v = project_to_screen((float)GAME.dirt[i].x, (float)GAME.dirt[i].y);
+    m8_draw_tile_scaled(v.x, v.y, 32, 32, 32, GAME.dirt[i].texture_index);
+  }
+}
+
+void add_dirt_pile (int x, int y, int id)
+{
+  int num = rand();
+
+  if (num & 1) {
+    if (num & 2) {
+      Dirt *d = &GAME.dirt[GAME.dirt_count++];
+      d->x = x * GAME.tile_size;
+      d->y = y * GAME.tile_size;
+      d->texture_index = id;
+      d->collected = 0;
+    }
+    if (num & 4) {
+      Dirt *d = &GAME.dirt[GAME.dirt_count++];
+      d->x = x * GAME.tile_size + 32;
+      d->y = y * GAME.tile_size;
+      d->texture_index = id;
+      d->collected = 0;
+    }
+    if (num & 8) {
+      Dirt *d = &GAME.dirt[GAME.dirt_count++];
+      d->x = x * GAME.tile_size;
+      d->y = y * GAME.tile_size + 32;
+      d->texture_index = id;
+      d->collected = 0;
+    }
+    if (num & 16) {
+      Dirt *d = &GAME.dirt[GAME.dirt_count++];
+      d->x = x * GAME.tile_size + 32;
+      d->y = y * GAME.tile_size + 32;
+      d->texture_index = id;
+      d->collected = 0;
+    }
+  }
+}
+
 void add_tile (int x, int y)
 {
-  int i, idx;
-  if (GAME.tile_count >= MAX_TILES) return;
+  int i, idx, flags = 0xf;
+
+  if (GAME.tile_count >= MAX_TILES) {
+    return;
+  }
+
   for (i = 0; i < GAME.tile_count; i++) {
     if (GAME.tiles[i].x == x && GAME.tiles[i].y == y) {
       return;
     }
+    if (GAME.tiles[i].y == y && GAME.tiles[i].x == (x - 1)) {
+      flags &= ~1;
+      GAME.tiles[i].flags &= ~(1 << 2);
+    } else if (GAME.tiles[i].x == x && GAME.tiles[i].y == (y + 1)) {
+      flags &= ~(1 << 1);
+      GAME.tiles[i].flags &= ~(1 << 3);
+    } else if (GAME.tiles[i].y == y && GAME.tiles[i].x == (x + 1)) {
+      flags &= ~(1 << 2);
+      GAME.tiles[i].flags &= ~1;
+    } else if (GAME.tiles[i].x == x && GAME.tiles[i].y == (y - 1)) {
+      flags &= ~(1 << 3);
+      GAME.tiles[i].flags &= ~(1 << 1);
+    }
   }
+
   idx = GAME.tile_count++;
+
   GAME.tiles[idx].x = x;
   GAME.tiles[idx].y = y;
+  GAME.tiles[idx].flags = flags;
+
+  add_dirt_pile(x, y, GAME.dust_texture_index);
 }
 
 void add_room (Room *r)
@@ -281,32 +479,50 @@ void generate_world ()
   }
 }
 
+void draw_hud (Player *p)
+{
+  char score_string[20];
+
+  m8_fill_color(105, 106, 106);
+  m8_fill_rect(20, 23, 5, 9);
+  m8_fill_rect(25, 20, 30, 15);
+  m8_fill_color(106, 190, 48);
+
+  if (p->charge > 1.0) m8_fill_rect(27, 22, 5, 11);
+  if (p->charge > 2.0) m8_fill_rect(34, 22, 5, 11);
+  if (p->charge > 3.0) m8_fill_rect(41, 22, 5, 11);
+  if (p->charge > 4.0) m8_fill_rect(48, 22, 5, 11);
+
+  sprintf(score_string, "SCORE: %d", p->score);
+  m8_draw_text_8x8(ascii, score_string, (int)strlen(score_string), 20, 315);
+}
+
 void init_game (int width, int height)
 {
   GAME.room_count = 0;
   GAME.tile_count = 0;
   GAME.screen_width = width;
   GAME.screen_height = height;
+  GAME.tile_size = 64;
+  GAME.dirt_count = 0;
 
   generate_world();
 }
 
 void run (window_t *window, m8u32 *framebuffer, int width, int height)
 {
-  char debug_string[50];
-  unsigned int frame, start;
   int tw, th, channels;
   unsigned char *bmp;
   Mode8 *ctx;
   int start_index, end_index;
   Player robo;
+  int has_begun = 0;
 
   ctx = malloc(sizeof(Mode8));
 
   m8_use_context(ctx);
   m8_init(framebuffer, width, height);
 
-  init_game(width, height);
   init_player(&robo);
 
   bmp = stbi_load("robovac-sheet.png", &tw, &th, &channels, 0);
@@ -322,35 +538,76 @@ void run (window_t *window, m8u32 *framebuffer, int width, int height)
 
   free(bmp);
 
+  bmp = stbi_load("walltile.png", &tw, &th, &channels, 0);
+  m8_import_tiles_from_image(bmp, tw, th, channels, 32, &start_index, &end_index);
+  GAME.wall_texture_index = start_index;
+
+  free(bmp);
+
+  bmp = stbi_load("dust.png", &tw, &th, &channels, 0);
+  m8_import_tiles_from_image(bmp, tw, th, channels, 32, &start_index, &end_index);
+  GAME.dust_texture_index = start_index;
+
+  free(bmp);
+
+  init_game(width, height);
+
   while (!window->quit) {
-    start = SDL_GetTicks();
+    if (has_begun) {
+      if (window->keys.w) {
+        robo.is_accelerating = 1;
+      } else {
+        robo.is_accelerating = 0;
+      }
 
-    if (window->keys.w) {
-      robo.is_accelerating = 1;
+      if (robo.speed <= 0) {
+        if (window->keys.a) {
+          rotate_player(&robo, 0.25);
+        } else if (window->keys.d) {
+          rotate_player(&robo, -0.25);
+        }
+      }
     } else {
-      robo.is_accelerating = 0;
-    }
-
-    if (robo.speed <= 0) {
-      if (window->keys.a) {
-        rotate_player(&robo, 0.15);
-      } else if (window->keys.d) {
-        rotate_player(&robo, -0.15);
+      if (window->keys.enter) {
+        has_begun = 1;
       }
     }
 
-    update_player(&robo);
+    if (has_begun) {
+      if (robo.charge <= 0) {
+        const char* message = "Your battery has died";
+        const char* begin = "press ENTER to continue";
+        m8_draw_text_8x8(ascii, message, strlen(message), 235, 150);
+        m8_draw_text_8x8(ascii, begin, strlen(begin), 230, 170);
 
-    GAME.camera.x = robo.x + 32;
-    GAME.camera.y = robo.y + 32;
+        if (window->keys.enter) {
+          init_player(&robo);
+          init_game(width, height);
+        }
+      } else {
+        update_player(&robo);
 
-    draw_world();
-    draw_player(&robo);
+        GAME.camera.x = robo.x + (robo.tile_size / 2);
+        GAME.camera.y = robo.y + (robo.tile_size / 2);
 
-    frame = SDL_GetTicks() - start;
+        clean_dirt(&robo);
 
-    sprintf(debug_string, "frame: %dms", frame);
-    m8_draw_text_8x8(ascii, debug_string, (int)strlen(debug_string), 0, 0);
+        draw_world();
+        draw_dirt();
+        draw_player(&robo);
+        draw_hud(&robo);
+      }
+    } else {
+      const char* title = "ROBO-VAC 9000 TESTING FACILITY";
+      const char* desc1 = "Before being adopted by a human";
+      const char* desc2 = "you will learn how to clean a human home";
+      const char* begin = "press ENTER to continue";
+      m8_draw_text_8x8(ascii, title, strlen(title), 200, 150);
+      m8_draw_text_8x8(ascii, desc1, strlen(desc1), 200, 175);
+      m8_draw_text_8x8(ascii, desc2, strlen(desc2), 165, 185);
+      m8_draw_text_8x8(ascii, begin, strlen(begin), 230, 215);
+    }
+
     window_update(window, framebuffer);
     m8_clear();
   }
@@ -360,7 +617,7 @@ void run (window_t *window, m8u32 *framebuffer, int width, int height)
 }
 
 int main (void) {
-  int width = 960, height = 540;
+  int width = 640, height = 360;
   m8u32* framebuffer;
   window_t window;
 
