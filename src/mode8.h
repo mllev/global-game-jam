@@ -244,10 +244,10 @@ void m8_draw_tile_range (int index, int width, int height, float x, float y, int
 
 void m8_draw_sprite (float x, float y, float w, float h, unsigned char *img, int tw, int th)
 {
-  int start_x = (int)floor(x);
-  int start_y = (int)floor(y);
-  int width = (int)floor(w);
-  int height = (int)floor(h);
+  int start_x = (int)round(x);
+  int start_y = (int)round(y);
+  int width = (int)round(w);
+  int height = (int)round(h);
   int tmp;
 
   int end_x = start_x + width - 1;
