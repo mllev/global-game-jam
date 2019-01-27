@@ -1,0 +1,8 @@
+ROBOVAC9000
+
+robovacuum testing center
+preparing to turn a sad home in a happy home
+
+procedurally generate world tiles
+write collision code - (very simple) stop movement when collision is detected
+procedurally generate wall tiles - purely asthetic
