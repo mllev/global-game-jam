@@ -248,7 +248,6 @@ void m8_draw_sprite (float x, float y, float w, float h, unsigned char *img, int
   int start_y = (int)round(y);
   int width = (int)round(w);
   int height = (int)round(h);
-  int tmp;
 
   int end_x = start_x + width - 1;
   int end_y = start_y + height - 1;

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "font.h"
+#include "images.h"
 
 #define WINDOW_IMPLEMENTATION
 #include "window.h"
@@ -426,9 +427,12 @@ void draw_dirt ()
 {
   int i, max = GAME.dirt_count;
   for (i = 0; i < max; i++) {
-    if (GAME.dirt[i].collected) continue;
-    Vec2 v = project_to_screen((float)GAME.dirt[i].x, (float)GAME.dirt[i].y);
-    m8_draw_tile_scaled(v.x, v.y, 32, 32, 32, GAME.dirt[i].texture_index);
+    if (GAME.dirt[i].collected) {
+      continue;
+    } else {
+      Vec2 v = project_to_screen((float)GAME.dirt[i].x, (float)GAME.dirt[i].y);
+      m8_draw_tile_scaled(v.x, v.y, 32, 32, 32, GAME.dirt[i].texture_index);
+    }
   }
 }
 
@@ -603,10 +607,10 @@ void init_game (int width, int height)
   generate_world();
 }
 
-void load_texture (const char *file, int *start, int *end)
+void load_texture (const unsigned char *file, int len, int *start, int *end)
 {
   int tw, th, channels;
-  unsigned char *bmp = stbi_load(file, &tw, &th, &channels, 0);
+  unsigned char *bmp = stbi_load_from_memory(file, len, &tw, &th, &channels, 0);
   m8_import_tiles_from_image(bmp, tw, th, channels, 32, start, end);
   free(bmp);
 }
@@ -625,17 +629,17 @@ void run (window_t *window, m8u32 *framebuffer, int width, int height)
 
   init_player(&robo);
 
-  load_texture("images/robovac-sheet.png", &start_index, &end_index);
+  load_texture(robovac_sheet_png, robovac_sheet_png_len, &start_index, &end_index);
   robo.texture_start_index = start_index;
   robo.texture_end_index = end_index;
 
-  load_texture("images/floortile.png", &start_index, &end_index);
+  load_texture(floortile_png, floortile_png_len, &start_index, &end_index);
   GAME.floor_texture_index = start_index;
 
-  load_texture("images/walltile.png", &start_index, &end_index);
+  load_texture(walltile_png, walltile_png_len, &start_index, &end_index);
   GAME.wall_texture_index = start_index;
 
-  load_texture("images/dust.png", &start_index, &end_index);
+  load_texture(dust_png, dust_png_len, &start_index, &end_index);
   GAME.dust_texture_index = start_index;
 
   init_game(width, height);
