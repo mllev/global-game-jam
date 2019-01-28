@@ -21,7 +21,6 @@ package_app:
 	mkdir -p "./build/$(APP_NAME).app"/Contents/{MacOS,Resources}
 	cp -R "$(FRAMEWORK_PATH)/SDL2.framework" "./build/$(APP_NAME).app/Contents/Resources/"
 	cp Info.plist "./build/$(APP_NAME).app/Contents/"
-	cp -R "./images" "./build/$(APP_NAME).app/Contents/MacOS/"
 	sed -e "s/APP_NAME/$(APP_NAME)/g" -i "" "./build/$(APP_NAME).app/Contents/Info.plist"
 	cp ./$(APP_NAME) "./build/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)"
 
